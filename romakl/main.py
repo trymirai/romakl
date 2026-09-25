@@ -26,25 +26,27 @@ def run(
     conversations = load_conversations(dataset)
     logger.info("Loaded {} conversations", len(conversations))
 
-    models = {name: Model.init(name) for name in [reference, *students]}
+    reference_model = Model.init(reference)
+    from .vendors.lalamo import LalamoModel
 
-    reference_model = models[reference]
-    generation_params = reference_model.generation_params
+    assert isinstance(reference_model, LalamoModel), "reference must be a Lalamo model"
+    models = {name: Model.init(name, reference_model.codec.config) for name in students}
+    generation_config = reference_model.model.config.generation_config
 
     prompts = reference_model.tokenize(conversations)
     if any(model.tokenize(conversations) != prompts for model in models.values()):
         raise ValueError("model tokenization differs from the reference")
 
-    cache_data = (hash_folder_with_edittimes(reference_model.path), prompts, cattrs.unstructure(generation_params))
-    rollout_path = cache_path / f"{sha256(json.dumps(cache_data).encode()).hexdigest()}.json"
+    cache_key = (hash_folder_with_edittimes(reference_model.path), prompts, cattrs.unstructure(generation_config))
+    rollout_path = cache_path / f"{sha256(json.dumps(cache_key).encode()).hexdigest()}.json"
     reference_rollouts: list[Rollout] | None = load_rollouts(rollout_path)
     if reference_rollouts is None:
-        reference_rollouts = reference_model.generate(prompts, generation_params)
+        reference_rollouts = reference_model.generate(prompts, generation_config, seed=0, token_limit=256)
         save_rollouts(rollout_path, reference_rollouts)
 
     scores = {}
     for student_name in students:
-        scores[student_name] = score(models[student_name], reference_model, reference_rollouts, generation_params)
+        scores[student_name] = score(models[student_name], reference_model, reference_rollouts, generation_config)
         logger.info(f"Model {student_name} got {scores[student_name]}")
 
     logger.info("done.")
