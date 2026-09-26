@@ -25,7 +25,7 @@ class ExLlamaModel(Model):
         for rollout in rollouts:
             inputs = torch.tensor([rollout.tokens[:-1]], dtype=torch.long)
             logits = model.forward(inputs, {"last_tokens_only": sum(rollout.mask)})[0]
-            result.append(logits.float().cpu().numpy())
+            result.append(logits.half().cpu().numpy())
         model.unload()
         torch.cuda.empty_cache()
         return result

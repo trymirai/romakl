@@ -25,24 +25,24 @@ class LalamoModel(Model):
     def generate(
         self, prompts: list[list[int]], generation_config: GenerationConfig, *, seed: int, token_limit: int
     ) -> list[Rollout]:
+        prompt_lengths = [len(prompt) for prompt in prompts]
+        max_prompt_length = max(prompt_lengths)
+        padded_prompts = [prompt + [0] * (max_prompt_length - len(prompt)) for prompt in prompts]
+        generated = self.model.generate_tokens(
+            jnp.asarray(padded_prompts, dtype=jnp.int32),
+            generation_config,
+            prompt_lengths_without_padding=jnp.asarray(prompt_lengths, dtype=jnp.int32),
+            max_output_length=token_limit,
+            keychain=Keychain.init(seed, sharding_config=self.model.sharding_config),
+        ).token_ids.tolist()
         result = []
-        for index, prompt in enumerate(prompts):
-            tokens = (
-                self.model.generate_tokens(
-                    jnp.asarray([prompt], dtype=jnp.int32),
-                    generation_config,
-                    max_output_length=token_limit,
-                    keychain=Keychain.init(seed + index, sharding_config=self.model.sharding_config),
-                )
-                .token_ids[0]
-                .tolist()
-            )
-            tokens = self.model.trim_at_eos(tokens)
+        for prompt, generated_tokens in zip(prompts, generated, strict=True):
+            tokens = self.model.trim_at_eos(generated_tokens)
             result.append(Rollout([*prompt, *tokens], [0] * len(prompt) + [1] * len(tokens)))
         return result
 
     def logits(self, rollouts: list[Rollout]) -> list[np.ndarray]:
-        # Lalamo's Pallas prefill path rejects this suffix forward pass.
+        # Lalamo's Pallas attention only supports one query token; scoring needs every logit.
         config = DecoderForwardPassConfig.for_inference()
         transformer_config = config.transformer_forward_pass_config
         mixer_config = replace(
@@ -53,14 +53,38 @@ class LalamoModel(Model):
             config,
             transformer_forward_pass_config=replace(transformer_config, mixer_forward_pass_config=mixer_config),
         )
-        result = []
-        for rollout in rollouts:
-            logits = self.model.decoder(
-                jnp.asarray([rollout.tokens[:-1]], dtype=jnp.int32),
-                jnp.arange(len(rollout.tokens) - 1, dtype=jnp.int32)[None, :],
-                return_suffix_tokens=sum(rollout.mask),
+        lengths = [len(rollout.tokens) - 1 for rollout in rollouts]
+        chunk_size = 64
+        padded_length = ((max(lengths) + chunk_size - 1) // chunk_size) * chunk_size
+        token_ids = jnp.asarray(
+            [
+                rollout.tokens[:-1] + [0] * (padded_length - length)
+                for rollout, length in zip(rollouts, lengths, strict=True)
+            ],
+            dtype=jnp.int32,
+        )
+        positions = jnp.broadcast_to(jnp.arange(padded_length, dtype=jnp.int32), token_ids.shape)
+        lengths_without_padding = jnp.asarray(lengths, dtype=jnp.int32)
+        state = self.model.decoder.init_static_state(
+            len(rollouts), padded_length + 1, config.embedding_forward_pass_config.activation_dtype
+        )
+        logits_by_rollout: list[list[np.ndarray]] = [[] for _ in rollouts]
+        for chunk_start in range(0, padded_length, chunk_size):
+            decoded = self.model.decoder(
+                token_ids[:, chunk_start : chunk_start + chunk_size],
+                positions[:, chunk_start : chunk_start + chunk_size],
+                state=state,
+                return_updated_state=True,
+                lengths_without_padding=jnp.clip(lengths_without_padding - chunk_start, 0, chunk_size),
                 forward_pass_config=config,
                 keychain=Keychain.init(0, sharding_config=self.model.sharding_config),
-            ).logits[0]
-            result.append(np.asarray(logits, dtype=np.float32))
-        return result
+            )
+            assert decoded.updated_state is not None
+            state = decoded.updated_state
+            chunk_logits = np.asarray(decoded.logits, dtype=np.float16)
+            for index, (rollout, length) in enumerate(zip(rollouts, lengths, strict=True)):
+                output_start = max(0, length - sum(rollout.mask) - chunk_start)
+                output_end = min(chunk_size, length - chunk_start)
+                if output_start < output_end:
+                    logits_by_rollout[index].append(chunk_logits[index, output_start:output_end].copy())
+        return [np.concatenate(chunks) for chunks in logits_by_rollout]

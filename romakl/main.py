@@ -44,9 +44,10 @@ def run(
         reference_rollouts = reference_model.generate(prompts, generation_config, seed=0, token_limit=256)
         save_rollouts(rollout_path, reference_rollouts)
 
+    teacher_logits = reference_model.logits(reference_rollouts)
     scores = {}
     for student_name in students:
-        scores[student_name] = score(models[student_name], reference_model, reference_rollouts, generation_config)
+        scores[student_name] = score(models[student_name], teacher_logits, reference_rollouts, generation_config)
         logger.info(f"Model {student_name} got {scores[student_name]}")
 
     logger.info("done.")

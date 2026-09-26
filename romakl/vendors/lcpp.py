@@ -62,5 +62,5 @@ class GGUFModel(Model):
             for rollout in rollouts:
                 model.reset()
                 model.eval(rollout.tokens[:-1])
-                result.append(model.scores[model.n_tokens - sum(rollout.mask) : model.n_tokens].copy())
+                result.append(model.scores[model.n_tokens - sum(rollout.mask) : model.n_tokens].astype(np.float16))
         return result
