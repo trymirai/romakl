@@ -9,6 +9,7 @@ from loguru import logger
 from typer import Argument, Option, Typer
 
 from .model import Model
+from .vendors.lalamo import LalamoModel
 from .dataset import load_conversations
 from .scoring import score
 from .rollouts import Rollout, hash_folder_with_edittimes, load_rollouts, save_rollouts
@@ -18,24 +19,23 @@ app = Typer(pretty_exceptions_show_locals=False)
 
 @app.command()
 def run(
-    reference: Annotated[str, Argument(help="Lalamo reference model path")],
-    students: Annotated[list[str], Argument(help="Student model paths")],
+    reference: Annotated[Path, Argument(help="Lalamo reference model path")],
+    students: Annotated[list[str], Argument(help="Student models as engine:path")],
     dataset: Annotated[str, Option(help="Hugging Face conversation dataset")] = "trymirai/kl-mixture",
     cache_path: Annotated[Path, Option(help="Teacher trace cache directory")] = Path("teacher-cache"),
 ) -> None:
     conversations = load_conversations(dataset)
     logger.info("Loaded {} conversations", len(conversations))
 
-    reference_model = Model.init(reference)
-    from .vendors.lalamo import LalamoModel
-
-    assert isinstance(reference_model, LalamoModel), "reference must be a Lalamo model"
+    reference_model = LalamoModel.load(reference.expanduser())
     models = {name: Model.init(name, reference_model.codec.config) for name in students}
     generation_config = reference_model.model.config.generation_config
 
     prompts = reference_model.tokenize(conversations)
     if any(model.tokenize(conversations) != prompts for model in models.values()):
         raise ValueError("model tokenization differs from the reference")
+    prompts = [prompt for prompt in prompts if len(prompt) <= 32_768]
+    logger.info("Kept {} prompts of at most 32k tokens", len(prompts))
 
     cache_key = (hash_folder_with_edittimes(reference_model.path), prompts, cattrs.unstructure(generation_config))
     rollout_path = cache_path / f"{sha256(json.dumps(cache_key).encode()).hexdigest()}.json"

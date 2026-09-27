@@ -11,6 +11,12 @@ class Rollout:
     tokens: list[int]
     mask: list[int]
 
+    def __post_init__(self) -> None:
+        assert len(self.mask) == len(self.tokens), "mask must have one entry per token"
+        assert set(self.mask) <= {0, 1}, "mask must be binary"
+        assert self.mask == sorted(self.mask), "mask must be prompt zeros followed by continuation ones"
+        assert 0 < sum(self.mask) < len(self.mask), "rollout must have both a prompt and a continuation"
+
 
 def hash_folder_with_edittimes(path: Path | str) -> str:
     path = Path(path).resolve()

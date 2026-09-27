@@ -1,5 +1,5 @@
 # ruff: noqa: I001
-from .model import Model
+from .model import StudentModel
 from .rollouts import Rollout
 from dataclasses import dataclass
 
@@ -57,7 +57,10 @@ class Score:
 
 
 def score(
-    student: Model, all_teacher_logits: list[np.ndarray], rollouts: list[Rollout], generation_config: GenerationConfig
+    student: StudentModel,
+    all_teacher_logits: list[np.ndarray],
+    rollouts: list[Rollout],
+    generation_config: GenerationConfig,
 ) -> Score:
     all_student_logits = student.logits(rollouts)
 
