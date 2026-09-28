@@ -20,7 +20,7 @@ app = Typer(pretty_exceptions_show_locals=False)
 @app.command()
 def run(
     reference: Annotated[Path, Argument(help="Lalamo reference model path")],
-    students: Annotated[list[str], Argument(help="Student models as engine:path")],
+    students: Annotated[list[str], Argument(help="Student model paths")],
     dataset: Annotated[str, Option(help="Hugging Face conversation dataset")] = "trymirai/kl-mixture",
     cache_path: Annotated[Path, Option(help="Teacher trace cache directory")] = Path("teacher-cache"),
 ) -> None:
@@ -30,6 +30,7 @@ def run(
     reference_model = LalamoModel.load(reference.expanduser())
     models = {name: Model.init(name, reference_model.codec.config) for name in students}
     generation_config = reference_model.model.config.generation_config
+    logger.info("Loaded the reference and {} students", len(models))
 
     prompts = reference_model.tokenize(conversations)
     if any(model.tokenize(conversations) != prompts for model in models.values()):
@@ -41,12 +42,15 @@ def run(
     rollout_path = cache_path / f"{sha256(json.dumps(cache_key).encode()).hexdigest()}.json"
     reference_rollouts: list[Rollout] | None = load_rollouts(rollout_path)
     if reference_rollouts is None:
+        logger.info("Generating {} rollouts", len(prompts))
         reference_rollouts = reference_model.generate(prompts, generation_config, seed=0, token_limit=256)
         save_rollouts(rollout_path, reference_rollouts)
 
+    logger.info("Computing teacher logits")
     teacher_logits = reference_model.logits(reference_rollouts)
     scores = {}
     for student_name in students:
+        logger.info("Scoring {}", student_name)
         scores[student_name] = score(models[student_name], teacher_logits, reference_rollouts, generation_config)
         logger.info(f"Model {student_name} got {scores[student_name]}")
 

@@ -2436,7 +2436,8 @@ dependencies = [
     { name = "cattrs" },
     { name = "cryptography" },
     { name = "datasets" },
-    { name = "jax" },
+    { name = "exllamav3" },
+    { name = "jax", extra = ["cuda"] },
     { name = "jaxtyping" },
     { name = "lalamo" },
     { name = "llama-cpp-python" },
@@ -2444,16 +2445,12 @@ dependencies = [
     { name = "msgspec" },
     { name = "numpy" },
     { name = "tokenizers" },
+    { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
+    { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
     { name = "typer" },
 ]
 
 [package.dev-dependencies]
-cuda = [
-    { name = "exllamav3" },
-    { name = "jax", extra = ["cuda"] },
-    { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
-]
 dev = [
     { name = "pyrefly" },
     { name = "pytest" },
@@ -2465,7 +2462,8 @@ requires-dist = [
     { name = "cattrs", specifier = ">=26.2.0" },
     { name = "cryptography", specifier = ">=50.0.1" },
     { name = "datasets", specifier = ">=4.8.5,<5" },
-    { name = "jax", specifier = ">=0.11.0,<0.12" },
+    { name = "exllamav3", specifier = "==1.5.1" },
+    { name = "jax", extras = ["cuda"], specifier = ">=0.11.0,<0.12" },
     { name = "jaxtyping", specifier = ">=0.2.36" },
     { name = "lalamo", git = "https://github.com/trymirai/lalamo?branch=main" },
     { name = "llama-cpp-python", git = "https://github.com/abetlen/llama-cpp-python?branch=main" },
@@ -2473,16 +2471,12 @@ requires-dist = [
     { name = "msgspec", specifier = ">=0.19,<1" },
     { name = "numpy", specifier = ">=2,<3" },
     { name = "tokenizers", specifier = ">=0.22,<0.24" },
+    { name = "torch", marker = "sys_platform != 'linux'", specifier = "==2.10.0" },
+    { name = "torch", marker = "sys_platform == 'linux'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu128" },
     { name = "typer", specifier = ">=0.15.1,<0.26" },
 ]
 
 [package.metadata.requires-dev]
-cuda = [
-    { name = "exllamav3", specifier = "==1.5.1" },
-    { name = "jax", extras = ["cuda"], specifier = ">=0.11.0,<0.12" },
-    { name = "torch", marker = "sys_platform != 'linux'", specifier = "==2.10.0" },
-    { name = "torch", marker = "sys_platform == 'linux'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu128" },
-]
 dev = [
     { name = "pyrefly", specifier = ">=0.60.2" },
     { name = "pytest", specifier = ">=8" },

@@ -1,3 +1,4 @@
+import os
 from abc import abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
@@ -5,6 +6,10 @@ from pathlib import Path
 from typing import Protocol
 
 import numpy as np
+
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")  # Share the GPU with non-lalamo students.
+os.environ.setdefault("JAX_COMPILATION_CACHE_DIR", "/tmp/romakl-cache")  # noqa: S108
+
 from lalamo import ChatCodec, ChatCodecConfig, Message
 from lalamo.models.language_model import GenerationConfig
 from tokenizers import Tokenizer
