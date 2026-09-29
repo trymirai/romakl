@@ -53,6 +53,9 @@ def run(
         logger.info("Scoring {}", student_name)
         scores[student_name] = score(models[student_name], teacher_logits, reference_rollouts, generation_config)
         logger.info(f"Model {student_name} got {scores[student_name]}")
+        logger.info(
+            "Model {} generates with {:.2f} GB of weights", student_name, models[student_name].generator_bytes() / 1e9
+        )
 
     logger.info("done.")
 
