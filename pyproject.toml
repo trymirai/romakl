@@ -35,14 +35,15 @@ include = ["romakl*"]
 
 [tool.uv]
 package = true
+environments = ["sys_platform == 'linux'"]
 
 [tool.uv.extra-build-variables]
-llama-cpp-python = { CMAKE_ARGS = "-DGGML_CUDA=on" }
+llama-cpp-python = { CMAKE_ARGS = "-DGGML_CUDA=on -DGGML_CUDA_FORCE_CUBLAS=ON" }
 
 [tool.uv.sources]
-lalamo = { git = "https://github.com/trymirai/lalamo", branch = "main" }
-llama-cpp-python = { git = "https://github.com/abetlen/llama-cpp-python", branch = "main" }
-torch = { index = "pytorch-cu128", marker = "sys_platform == 'linux'" }
+lalamo = { git = "https://github.com/trymirai/lalamo", rev = "45131441f137a71bb1c12219bd52c74cd8aaa9ed" }
+llama-cpp-python = { git = "https://github.com/abetlen/llama-cpp-python", rev = "3691546f1c9e0c1bf93323dff02230bd959cf562" }
+torch = { index = "pytorch-cu128" }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
@@ -75,7 +76,6 @@ python-version = "3.12.0"
 infer-with-first-use = false
 python-interpreter-path = ".venv/bin/python"
 project-includes = ["./"]
-ignore-missing-imports = ["exllamav3.*", "lalamo.*", "torch.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

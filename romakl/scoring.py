@@ -46,14 +46,19 @@ def expected_sampling_disagreement(
     return np.asarray(jnp.stack(disagreements))
 
 
+def top1_agreement(student_logits: np.ndarray, teacher_logits: np.ndarray) -> np.ndarray:
+    return student_logits.argmax(axis=-1) == teacher_logits.argmax(axis=-1)
+
+
 @dataclass(frozen=True)
 class Score:
     kl: float
     tv: float
     esd: float
+    top1: float
 
     def __str__(self) -> str:
-        return f"KL {self.kl:>8.3g}  TV {self.tv:>8.3g}  ESD {self.esd:>8.3g}"
+        return f"KL {self.kl:>8.3g}  TV {self.tv:>8.3g}  ESD {self.esd:>8.3g}  top-1 {self.top1:>8.3g}"
 
 
 def score(
@@ -64,7 +69,7 @@ def score(
 ) -> Score:
     all_student_logits = student.logits(rollouts)
 
-    total_kl, total_tv, total_esd, total_tokens = 0.0, 0.0, 0.0, 0
+    total_kl, total_tv, total_esd, total_top1, total_tokens = 0.0, 0.0, 0.0, 0, 0
     for rollout, teacher_logits, student_logits in zip(rollouts, all_teacher_logits, all_student_logits, strict=True):
         teacher_logp = log_probabilities_from_logits(teacher_logits)
         student_logp = log_probabilities_from_logits(student_logits)
@@ -75,6 +80,12 @@ def score(
         total_esd += float(
             expected_sampling_disagreement(student_logits, teacher_logits, rollout, generation_config).sum(),
         )
+        total_top1 += int(top1_agreement(student_logits, teacher_logits).sum())
         total_tokens += sum(rollout.mask)
 
-    return Score(kl=total_kl / total_tokens, tv=total_tv / total_tokens, esd=total_esd / total_tokens)
+    return Score(
+        kl=total_kl / total_tokens,
+        tv=total_tv / total_tokens,
+        esd=total_esd / total_tokens,
+        top1=total_top1 / total_tokens,
+    )
