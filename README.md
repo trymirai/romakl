@@ -12,7 +12,7 @@ Options:
                        lalamo  Lalamo model directory
                        lcpp    GGUF file, with tokenizer.json next to it
                        exl     EXL3 directory containing tokenizer.json
-  --dataset TEXT     Encrypted conversation dataset  [default: trymirai/kl-mixture]
+  --dataset TEXT     Hugging Face conversation dataset  [default: trymirai/kl-mixture]
                      The default is private: run `hf auth login` with trymirai access first
   --cache-path PATH  Reference rollout cache  [default: teacher-cache]
 

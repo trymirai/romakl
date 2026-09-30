@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from lalamo.models.language_model import GenerationConfig
+from lalamo.sampling import SamplingPolicy
 
 
 def expected_sampling_disagreement(
@@ -29,15 +30,13 @@ def expected_sampling_disagreement(
     prompt = jnp.asarray(rollout.tokens[:output_start], dtype=jnp.int32)
     policy = policy.with_prompt_token_counts(prompt, jnp.asarray(output_start), student_logits.shape[-1])
 
-    disagreements = []
-    for student_row, teacher_row, token in zip(
-        student_logits, teacher_logits, rollout.tokens[output_start:], strict=True
-    ):
+    def step(policy: SamplingPolicy, rows: tuple[jax.Array, jax.Array, jax.Array]) -> tuple[SamplingPolicy, jax.Array]:
+        student_row, teacher_row, token = rows
         student_probs = jax.nn.softmax(policy.process_logits(jnp.asarray(student_row, dtype=jnp.float32)))
         teacher_probs = jax.nn.softmax(policy.process_logits(jnp.asarray(teacher_row, dtype=jnp.float32)))
-        disagreements.append(jnp.abs(student_probs - teacher_probs).sum() / 2)
-        policy = policy.with_next_token_count(jnp.asarray(token))
-    return jnp.stack(disagreements)
+        return policy.with_next_token_count(token), jnp.abs(student_probs - teacher_probs).sum() / 2
+
+    return jax.lax.scan(step, policy, (student_logits, teacher_logits, jnp.asarray(rollout.tokens[output_start:])))[1]
 
 
 def kl_divergence(student_logits: jax.Array, teacher_logits: jax.Array) -> jax.Array:

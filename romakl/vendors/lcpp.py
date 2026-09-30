@@ -47,7 +47,12 @@ class GGUFModel(Model, StudentModel):
             )
         ) as model:
             for rollout in rollouts:
+                output_tokens = sum(rollout.mask)
                 model.reset()
-                model.eval(rollout.tokens[:-1])
-                result.append(model.scores[model.n_tokens - sum(rollout.mask) : model.n_tokens].astype(np.float16))
+                # eval computes logits for every token it is given under logits_all, so the prompt runs without it.
+                model._logits_all = False  # noqa: SLF001
+                model.eval(rollout.tokens[: -output_tokens - 1])
+                model._logits_all = True  # noqa: SLF001
+                model.eval(rollout.tokens[-output_tokens - 1 : -1])
+                result.append(model.scores[model.n_tokens - output_tokens : model.n_tokens].astype(np.float16))
         return result

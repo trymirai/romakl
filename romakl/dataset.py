@@ -13,7 +13,8 @@ from lalamo.models.chat_codec import AssistantMessage, Message, ReasoningEffort,
 class Conversation:
     messages: list[Message]
     tools: list[ToolSchema] | None
-    reasoning_effort: ReasoningEffort
+    # None means the model's default effort.
+    reasoning_effort: ReasoningEffort | None
     source: str
     domain: str
 
@@ -37,7 +38,7 @@ def load_conversations(dataset_url: str) -> list[Conversation]:
     fernet = Fernet(base64.urlsafe_b64encode(hashlib.sha256(b"mirai labs").digest()))
     conversations = [
         Conversation(
-            [parse_hf_message(message) for message in try_decrypting(messages, fernet)],
+            [parse_hf_message(message) for message in try_decrypting(messages, fernet) or []],
             try_decrypting(tools, fernet),
             ReasoningEffort(reasoning_effort),
             source,

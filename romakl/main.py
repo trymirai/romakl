@@ -1,5 +1,6 @@
 # ruff: noqa: I001
 import json
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 from typing import Annotated
@@ -22,19 +23,24 @@ def run(
     reference: Annotated[Path, Option(help="Lalamo reference model path")],
     students: Annotated[list[str], Option("--student", help="Student as engine:path; repeat for several")],
     dataset: Annotated[str, Option(help="Hugging Face conversation dataset")] = "trymirai/kl-mixture",
-    cache_path: Annotated[Path, Option(help="Teacher trace cache directory")] = Path("teacher-cache"),
+    cache_path: Annotated[Path, Option(help="Reference rollout cache")] = Path("teacher-cache"),
 ) -> None:
     conversations = load_conversations(dataset)
     logger.info("Loaded {} conversations", len(conversations))
 
     reference_model = LalamoModel.load(reference.expanduser())
-    models = {name: Model.init(name, reference_model.codec.config) for name in students}
     generation_config = reference_model.model.config.generation_config
-    logger.info("Loaded the reference and {} students", len(models))
+    logger.info("Loaded the reference")
+
+    reasoning_config = reference_model.codec.config.reasoning_config
+    supported_efforts = reasoning_config.reasoning_effort_to_field_value if reasoning_config else {}
+    for index, conversation in enumerate(conversations):
+        if conversation.reasoning_effort not in supported_efforts:
+            effort = conversation.reasoning_effort
+            logger.warning("{} asks for unsupported {} reasoning; using the default", conversation.source, effort)
+            conversations[index] = replace(conversation, reasoning_effort=None)
 
     prompts = reference_model.tokenize(conversations)
-    if any(model.tokenize(conversations) != prompts for model in models.values()):
-        raise ValueError("model tokenization differs from the reference")
     kept = [index for index, prompt in enumerate(prompts) if len(prompt) <= 32_768]
     conversations = [conversations[index] for index in kept]
     prompts = [prompts[index] for index in kept]
@@ -56,15 +62,19 @@ def run(
 
     logger.info("Computing teacher logits")
     teacher_logits = reference_model.logits(reference_rollouts)
-    scores = {}
+    scores, sizes = {}, {}
     for student_name in students:
         logger.info("Scoring {}", student_name)
-        scores[student_name] = score(models[student_name], teacher_logits, reference_rollouts, generation_config)
+        student = Model.init(student_name, reference_model.codec.config)
+        if student.tokenize(conversations) != prompts:
+            raise ValueError(f"{student_name} tokenization differs from the reference")
+        scores[student_name] = score(student, teacher_logits, reference_rollouts, generation_config)
+        sizes[student_name] = student.generator_bytes() / 1e9
+        del student  # Release the weights before the next student loads.
 
     width = max(len(Path(name).name) for name in scores)
     for student_name, student_scores in scores.items():
-        size = models[student_name].generator_bytes() / 1e9
-        print(f"{Path(student_name).name:<{width}}  {mean_score(student_scores)}, {size:.2f} GB")
+        print(f"{Path(student_name).name:<{width}}  {mean_score(student_scores)}, {sizes[student_name]:.2f} GB")
     for index, (conversation, rollout) in enumerate(zip(conversations, reference_rollouts, strict=True)):
         generated = sum(rollout.mask)
         prompt_tokens = len(rollout.tokens) - generated
