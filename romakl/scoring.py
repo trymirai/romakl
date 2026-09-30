@@ -9,18 +9,12 @@ import numpy as np
 from lalamo.models.language_model import GenerationConfig
 
 
-def log_probabilities_from_logits(logits: np.ndarray) -> np.ndarray:
-    logits = logits.astype(np.float32)
-    maximum = logits.max(axis=-1, keepdims=True)
-    return logits - maximum - np.log(np.exp(logits - maximum).sum(axis=-1, keepdims=True))
-
-
 def expected_sampling_disagreement(
-    student_logits: np.ndarray,
-    teacher_logits: np.ndarray,
+    student_logits: jax.Array,
+    teacher_logits: jax.Array,
     rollout: Rollout,
     generation_config: GenerationConfig,
-) -> np.ndarray:
+) -> jax.Array:
     policy = generation_config.default_policy()
     if not policy.has_count_penalties:
         output_tokens = len(student_logits)
@@ -29,7 +23,7 @@ def expected_sampling_disagreement(
         teacher_rows = jnp.pad(jnp.asarray(teacher_logits, dtype=jnp.float32), padding)
         student_probs = jax.nn.softmax(jax.vmap(policy.process_logits)(student_rows))
         teacher_probs = jax.nn.softmax(jax.vmap(policy.process_logits)(teacher_rows))
-        return np.asarray(jnp.abs(student_probs - teacher_probs).sum(axis=-1)[:output_tokens] / 2)
+        return jnp.abs(student_probs - teacher_probs).sum(axis=-1)[:output_tokens] / 2
 
     output_start = len(rollout.tokens) - sum(rollout.mask)
     prompt = jnp.asarray(rollout.tokens[:output_start], dtype=jnp.int32)
@@ -43,10 +37,22 @@ def expected_sampling_disagreement(
         teacher_probs = jax.nn.softmax(policy.process_logits(jnp.asarray(teacher_row, dtype=jnp.float32)))
         disagreements.append(jnp.abs(student_probs - teacher_probs).sum() / 2)
         policy = policy.with_next_token_count(jnp.asarray(token))
-    return np.asarray(jnp.stack(disagreements))
+    return jnp.stack(disagreements)
 
 
-def top1_agreement(student_logits: np.ndarray, teacher_logits: np.ndarray) -> np.ndarray:
+def kl_divergence(student_logits: jax.Array, teacher_logits: jax.Array) -> jax.Array:
+    student_logp = jax.nn.log_softmax(student_logits.astype(jnp.float32))
+    teacher_logp = jax.nn.log_softmax(teacher_logits.astype(jnp.float32))
+    return (jnp.exp(teacher_logp) * (teacher_logp - student_logp)).sum(axis=-1)
+
+
+def tv_divergence(student_logits: jax.Array, teacher_logits: jax.Array) -> jax.Array:
+    student_probs = jax.nn.softmax(student_logits.astype(jnp.float32))
+    teacher_probs = jax.nn.softmax(teacher_logits.astype(jnp.float32))
+    return jnp.abs(student_probs - teacher_probs).sum(axis=-1) / 2
+
+
+def top1_agreement(student_logits: jax.Array, teacher_logits: jax.Array) -> jax.Array:
     return student_logits.argmax(axis=-1) == teacher_logits.argmax(axis=-1)
 
 
@@ -58,7 +64,16 @@ class Score:
     top1: float
 
     def __str__(self) -> str:
-        return f"KL {self.kl:>8.3g}  TV {self.tv:>8.3g}  ESD {self.esd:>8.3g}  top-1 {self.top1:>8.3g}"
+        return f"kl {self.kl:.4f}, tv {self.tv:.4f}, esd {self.esd:.4f}, top-1 {self.top1:.3f}"
+
+
+def mean_score(scores: list[Score]) -> Score:
+    return Score(
+        kl=sum(score.kl for score in scores) / len(scores),
+        tv=sum(score.tv for score in scores) / len(scores),
+        esd=sum(score.esd for score in scores) / len(scores),
+        top1=sum(score.top1 for score in scores) / len(scores),
+    )
 
 
 def score(
@@ -66,26 +81,22 @@ def score(
     all_teacher_logits: list[np.ndarray],
     rollouts: list[Rollout],
     generation_config: GenerationConfig,
-) -> Score:
+) -> list[Score]:
     all_student_logits = student.logits(rollouts)
 
-    total_kl, total_tv, total_esd, total_top1, total_tokens = 0.0, 0.0, 0.0, 0, 0
-    for rollout, teacher_logits, student_logits in zip(rollouts, all_teacher_logits, all_student_logits, strict=True):
-        teacher_logp = log_probabilities_from_logits(teacher_logits)
-        student_logp = log_probabilities_from_logits(student_logits)
-        teacher_prob = np.exp(teacher_logp)
-        student_prob = np.exp(student_logp)
-        total_kl += float((teacher_prob * (teacher_logp - student_logp)).sum())
-        total_tv += float(np.abs(teacher_prob - student_prob).sum() / 2)
-        total_esd += float(
-            expected_sampling_disagreement(student_logits, teacher_logits, rollout, generation_config).sum(),
+    result = []
+    for rollout, host_teacher_logits, host_student_logits in zip(
+        rollouts, all_teacher_logits, all_student_logits, strict=True
+    ):
+        teacher_logits = jnp.asarray(host_teacher_logits)
+        student_logits = jnp.asarray(host_student_logits)
+        esd = expected_sampling_disagreement(student_logits, teacher_logits, rollout, generation_config)
+        result.append(
+            Score(
+                kl=float(kl_divergence(student_logits, teacher_logits).mean()),
+                tv=float(tv_divergence(student_logits, teacher_logits).mean()),
+                esd=float(esd.mean()),
+                top1=float(top1_agreement(student_logits, teacher_logits).mean()),
+            )
         )
-        total_top1 += int(top1_agreement(student_logits, teacher_logits).sum())
-        total_tokens += sum(rollout.mask)
-
-    return Score(
-        kl=total_kl / total_tokens,
-        tv=total_tv / total_tokens,
-        esd=total_esd / total_tokens,
-        top1=total_top1 / total_tokens,
-    )
+    return result

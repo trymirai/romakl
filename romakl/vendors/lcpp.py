@@ -33,12 +33,16 @@ class GGUFModel(Model, StudentModel):
 
     def logits(self, rollouts: list[Rollout]) -> list[np.ndarray]:
         result = []
+        context = max(len(rollout.tokens) - 1 for rollout in rollouts)
         with closing(
             Llama(
                 str(self.path),
-                n_ctx=max(len(rollout.tokens) - 1 for rollout in rollouts),
+                n_ctx=context,
+                n_batch=context,
+                n_ubatch=2048,
                 n_gpu_layers=-1,
                 logits_all=True,
+                flash_attn=True,
                 verbose=False,
             )
         ) as model:

@@ -77,7 +77,6 @@ class LalamoModel(Model, TeacherModel, StudentModel):
         keychain = Keychain.init(0, sharding_config=self.model.sharding_config)
         result = []
         for rollout in rollouts:
-            logger.debug("Computing logits for {} tokens", len(rollout.tokens))
             length = len(rollout.tokens) - 1
             output_start = length - sum(rollout.mask)
             padded_length = math.ceil(length / chunk_size) * chunk_size
